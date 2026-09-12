@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Arch/BIM code no longer fails the sandbox pre-check.** Creating an
+  Arch Site, Building or Floor was rejected as "has null shape". These
+  containers are organizational groups that hold no geometry of their
+  own, so a null `Shape` is their normal, valid state for their whole
+  lifetime — the check now recognises them by `Proxy.Type` rather than by
+  a `TypeId` they share with unrelated scripted objects. Thanks to
+  @s-light for finding and fixing this.
+- **An unrelated call no longer gets blamed for a pre-existing problem.**
+  The sandbox snapshots which objects are already broken before running
+  your code, so it can tell what your code actually changed. That
+  snapshot was taken without recomputing the document first, while the
+  post-run check always recomputes — so an object that recomputes
+  differently in the headless sandbox than it did live was missing from
+  the snapshot, and every later call, even a read-only one, was reported
+  as having put it in an Invalid state. Thanks to @s-light.
+
 ## [0.24.0-alpha] - 2026-09-07
 
 ### Added
