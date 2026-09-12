@@ -160,14 +160,24 @@ def _collect_object_issues(objects_state, baseline_bad):
     # still lands in an Invalid state and is caught by the invalid_state report
     # below. Kept local so it ships with the function source into the sandbox
     # harness (inspect.getsource doesn't carry module globals).
+    # Arch/BIM containers (Site, Building, BuildingPart/Floor) are pure
+    # organizational groups — they hold no geometry of their own and report a
+    # null Shape for their entire lifetime, empty or fully populated. Flagging
+    # that blocked every Arch.makeSite/makeBuilding/makeFloor call. These are
+    # scripted objects (Part::FeaturePython / App::GeometryPython) — the
+    # generic TypeId is shared with countless unrelated object types, so the
+    # semantic type has to come from Proxy.Type instead (e.g. "Site",
+    # "BuildingPart" — Building and Floor are both BuildingPart under the hood).
     null_shape_ok_types = {"Sketcher::SketchObject", "PartDesign::Body"}
+    null_shape_ok_proxy_types = {"Site", "Building", "BuildingPart", "Floor"}
     issues = []
     for st in objects_state:
         name = st["name"]
         if name in baseline_bad:
             continue
         if st.get("null"):
-            if st.get("type") not in null_shape_ok_types:
+            if (st.get("type") not in null_shape_ok_types
+                    and st.get("proxy_type") not in null_shape_ok_proxy_types):
                 issues.append("Object '" + name + "' has null shape")
         elif st.get("invalid"):
             issues.append("Object '" + name + "' has invalid shape")
@@ -268,13 +278,29 @@ try:
                 pass
         _state = getattr(_obj, "State", None)
         _bad_state = bool(_state and "Invalid" in _state)
+        _proxy_type = getattr(getattr(_obj, "Proxy", None), "Type", "")
         return {{"name": _obj.Name, "type": getattr(_obj, "TypeId", ""),
+                 "proxy_type": _proxy_type,
                  "null": _null, "invalid": _invalid, "invalid_state": _bad_state}}
 
     # Baseline: objects already broken in the opened document BEFORE user code
     # runs. The sandbox dry-runs against a copy of the saved document, so an
     # imported-and-converted mesh→solid that OCC considers invalid is present
     # on every run; without this snapshot it would fail unrelated code.
+    #
+    # Recompute once here, BEFORE snapshotting the baseline. The document was
+    # opened fresh (its on-disk cached shapes reflect whatever environment
+    # last saved it — typically the real GUI process), but the post-execution
+    # check further down forces its own doc.recompute() unconditionally. Some
+    # objects (e.g. a complex Arch::Wall whose Draft/OCC boolean fuse is
+    # sensitive to the fake-FreeCADGui/headless environment here) recompute
+    # differently under this sandbox than they did live — genuinely fine in
+    # the user's document, but landing in an Invalid state the moment this
+    # harness recomputes it. Without matching that recompute before the
+    # baseline snapshot, such an object is absent from `_baseline_bad` and
+    # every subsequent call — even a no-op read — gets its Invalid state
+    # blamed on that call's code.
+    doc.recompute()
     _baseline_bad = set()
     for _obj in doc.Objects:
         _s = _snap(_obj)
